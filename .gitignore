@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.env
+.venv/
+venv/
+.pytest_cache/
+.DS_Store
+
+# Internal planning/spec docs (kept locally, not part of the public template)
+docs/superpowers/
