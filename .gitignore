@@ -5,6 +5,9 @@ __pycache__/
 venv/
 .pytest_cache/
 .DS_Store
+data/*.db
+*.log
+*.sqlite3
 
 # Internal planning/spec docs (kept locally, not part of the public template)
 docs/superpowers/
