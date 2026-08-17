@@ -58,6 +58,34 @@ async def get_all_users() -> List[dict]:
         cursor = await db.execute("SELECT * FROM users")
         return await cursor.fetchall()
 
+async def get_expiring_soon_users(days: int = 7) -> List[dict]:
+    """دریافت کاربرانی که اشتراکشان تا روزهای مشخص منقضی می‌شود"""
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    future = (now + timedelta(days=days)).isoformat()
+    async with aiosqlite.connect(DATABASE_URL) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            """
+            SELECT * FROM users 
+            WHERE is_active = 1 
+            AND subscription_end > ? 
+            AND subscription_end <= ?
+            """,
+            (now.isoformat(), future)
+        )
+        return await cursor.fetchall()
+
+async def get_new_users_since(date: str) -> List[dict]:
+    """دریافت کاربرانی که بعد از تاریخ مشخص ثبت‌نام کرده‌اند"""
+    async with aiosqlite.connect(DATABASE_URL) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM users WHERE registered_at >= ?",
+            (date,)
+        )
+        return await cursor.fetchall()
+
 # ==================== تراکنش‌ها ====================
 
 async def create_transaction(
@@ -124,3 +152,143 @@ async def get_transactions_by_user(user_id: int) -> List[dict]:
             (user_id,)
         )
         return await cursor.fetchall()
+
+async def get_transaction(payment_id: str) -> Optional[dict]:
+    """دریافت اطلاعات یک تراکنش بر اساس شناسه پرداخت"""
+    async with aiosqlite.connect(DATABASE_URL) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM transactions WHERE payment_id = ?",
+            (payment_id,)
+        )
+        return await cursor.fetchone()
+
+
+# ==================== تخفیف‌ها ====================
+
+async def create_discount(code: str, percent: int, max_uses: int, expires_at: str):
+    async with aiosqlite.connect(DATABASE_URL) as db:
+        await db.execute(
+            """
+            INSERT INTO discounts (code, discount_percent, max_uses, expires_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (code, percent, max_uses, expires_at)
+        )
+        await db.commit()
+
+async def get_discount(code: str) -> Optional[dict]:
+    async with aiosqlite.connect(DATABASE_URL) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM discounts WHERE code = ? AND is_active = 1",
+            (code,)
+        )
+        return await cursor.fetchone()
+
+async def get_all_discounts() -> List[dict]:
+    async with aiosqlite.connect(DATABASE_URL) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM discounts ORDER BY id DESC")
+        return await cursor.fetchall()
+
+async def use_discount(code: str):
+    async with aiosqlite.connect(DATABASE_URL) as db:
+        await db.execute(
+            "UPDATE discounts SET used_count = used_count + 1 WHERE code = ?",
+            (code,)
+        )
+        await db.commit()
+        # اگر به حداکثر رسید، غیرفعال کن
+        discount = await get_discount(code)
+        if discount and discount["used_count"] >= discount["max_uses"]:
+            await db.execute(
+                "UPDATE discounts SET is_active = 0 WHERE code = ?",
+                (code,)
+            )
+            await db.commit()
+
+# ==================== پخش همگانی ====================
+
+async def create_broadcast(message: str) -> int:
+    async with aiosqlite.connect(DATABASE_URL) as db:
+        cursor = await db.execute(
+            """
+            INSERT INTO broadcasts (message, created_at)
+            VALUES (?, ?)
+            """,
+            (message, datetime.now().isoformat())
+        )
+        await db.commit()
+        return cursor.lastrowid
+
+async def update_broadcast_stats(broadcast_id: int, sent: int, failed: int):
+    async with aiosqlite.connect(DATABASE_URL) as db:
+        await db.execute(
+            """
+            UPDATE broadcasts 
+            SET sent_count = sent_count + ?, failed_count = failed_count + ?
+            WHERE id = ?
+            """,
+            (sent, failed, broadcast_id)
+        )
+        await db.commit()
+
+# ==================== تیکت‌ها ====================
+
+async def create_ticket(user_id: int, subject: str, message: str):
+    async with aiosqlite.connect(DATABASE_URL) as db:
+        await db.execute(
+            """
+            INSERT INTO tickets (user_id, subject, message, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (user_id, subject, message, datetime.now().isoformat())
+        )
+        await db.commit()
+
+async def get_ticket(ticket_id: int) -> Optional[dict]:
+    async with aiosqlite.connect(DATABASE_URL) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM tickets WHERE id = ?",
+            (ticket_id,)
+        )
+        return await cursor.fetchone()
+
+async def get_user_tickets(user_id: int) -> List[dict]:
+    async with aiosqlite.connect(DATABASE_URL) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM tickets WHERE user_id = ? ORDER BY created_at DESC",
+            (user_id,)
+        )
+        return await cursor.fetchall()
+
+async def get_all_tickets() -> List[dict]:
+    async with aiosqlite.connect(DATABASE_URL) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM tickets ORDER BY created_at DESC"
+        )
+        return await cursor.fetchall()
+
+async def answer_ticket(ticket_id: int, answer: str):
+    async with aiosqlite.connect(DATABASE_URL) as db:
+        await db.execute(
+            """
+            UPDATE tickets 
+            SET answer = ?, status = 'answered', answered_at = ?
+            WHERE id = ?
+            """,
+            (answer, datetime.now().isoformat(), ticket_id)
+        )
+        await db.commit()
+
+async def close_ticket(ticket_id: int):
+    async with aiosqlite.connect(DATABASE_URL) as db:
+        await db.execute(
+            "UPDATE tickets SET status = 'closed' WHERE id = ?",
+            (ticket_id,)
+        )
+        await db.commit()

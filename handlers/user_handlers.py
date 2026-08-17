@@ -1,11 +1,14 @@
 import uuid
-from datetime import datetime
-from aiogram import Router, types
-from aiogram.filters import Command
+from datetime import datetime, timedelta
+from aiogram import Router, types, F
+from aiogram.filters import Command, StateFilter
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.context import FSMContext
 from config import Config
 from database.repository import (
-    get_user, create_user, get_transactions_by_user,
-    create_transaction
+    get_user, create_user, update_user_subscription,
+    create_transaction, get_transactions_by_user,
+    get_discount, use_discount
 )
 from keyboards.inline import (
     get_main_keyboard, get_plans_keyboard,
@@ -15,6 +18,11 @@ from keyboards.inline import (
 from utils.jalali import to_jalali_full, get_remaining_days
 
 router = Router()
+
+# ==================== وضعیت‌های FSM ====================
+
+class PaymentStates(StatesGroup):
+    waiting_for_payment = State()
 
 # ==================== دستور /start ====================
 
@@ -30,7 +38,7 @@ async def start_command(message: types.Message):
         remaining = get_remaining_days(end_date)
         
         await message.answer(
-            f"🌟 **به Trade Craft FX خوش آمدید!**\n\n"
+            f"🌟 **به ایران کریپتو خوش آمدید!**\n\n"
             f"✅ شما هم‌اکنون کاربر VIP هستید.\n"
             f"📅 تاریخ انقضا: {to_jalali_full(end_date)}\n"
             f"⏳ روزهای باقی‌مانده: **{remaining} روز**\n\n"
@@ -40,7 +48,7 @@ async def start_command(message: types.Message):
         )
     else:
         await message.answer(
-            "🌟 **به Trade Craft FX خوش آمدید!**\n\n"
+            "🌟 **به ایران کریپتو خوش آمدید!**\n\n"
             "برای دسترسی به محتوای VIP، ابتدا اشتراک خود را تهیه کنید.\n\n"
             "💎 **پلن‌های ویژه:**\n"
             f"• یک ماهه: {Config.PRICES['1m']} دلار\n"
@@ -64,13 +72,16 @@ async def buy_subscription(callback: types.CallbackQuery):
     await callback.answer()
 
 @router.callback_query(lambda c: c.data.startswith("plan_"))
-async def select_plan(callback: types.CallbackQuery):
+async def select_plan(callback: types.CallbackQuery, state: FSMContext):
     plan_key = callback.data.replace("plan_", "")
     plan = Config.PLANS.get(plan_key)
     
     if not plan:
         await callback.answer("❌ پلن نامعتبر!", show_alert=True)
         return
+    
+    # ذخیره plan_key در state
+    await state.update_data(plan_key=plan_key)
     
     price = Config.PRICES[plan_key]
     
@@ -92,11 +103,17 @@ async def select_plan(callback: types.CallbackQuery):
 # ==================== پرداخت ====================
 
 @router.callback_query(lambda c: c.data.startswith("payment_"))
-async def show_payment_info(callback: types.CallbackQuery):
+async def show_payment_info(callback: types.CallbackQuery, state: FSMContext):
     method = callback.data.replace("payment_", "")
-    plan_key = "1m"
+    
+    # دریافت plan_key از state
+    data = await state.get_data()
+    plan_key = data.get("plan_key", "1m")
     
     payment_id = f"PAY-{uuid.uuid4().hex[:8].upper()}"
+    await state.update_data(payment_id=payment_id, plan_key=plan_key)
+    
+    price = Config.PRICES[plan_key]
     
     if method == "card":
         text = (
@@ -104,7 +121,7 @@ async def show_payment_info(callback: types.CallbackQuery):
             f"━━━━━━━━━━━━━━━━━\n"
             f"🏦 شماره کارت:\n`{Config.CARD_NUMBER}`\n"
             f"👤 نام صاحب کارت: {Config.CARD_OWNER}\n\n"
-            f"💰 مبلغ: {Config.PRICES[plan_key]} دلار\n\n"
+            f"💰 مبلغ: **{price} دلار**\n\n"
             f"پس از واریز، روی دکمه **«پرداخت انجام شد»** کلیک کنید."
         )
         await callback.message.edit_text(
@@ -119,7 +136,7 @@ async def show_payment_info(callback: types.CallbackQuery):
             f"💎 نوع ارز: {Config.CRYPTO_TYPE}\n"
             f"🌐 شبکه: {Config.CRYPTO_NETWORK}\n"
             f"📬 آدرس کیف پول:\n`{Config.CRYPTO_WALLET}`\n\n"
-            f"💰 مبلغ: {Config.PRICES[plan_key]} دلار\n\n"
+            f"💰 مبلغ: **{price} دلار**\n\n"
             f"پس از واریز، روی دکمه **«پرداخت انجام شد»** کلیک کنید."
         )
         await callback.message.edit_text(
@@ -139,20 +156,25 @@ async def show_payment_info(callback: types.CallbackQuery):
     
     await callback.answer()
 
-# ==================== تأیید پرداخت ====================
+# ==================== تأیید پرداخت (کاربر) ====================
 
 @router.callback_query(lambda c: c.data.startswith("confirm_"))
-async def confirm_payment(callback: types.CallbackQuery):
+async def confirm_payment(callback: types.CallbackQuery, state: FSMContext):
     payment_id = callback.data.replace("confirm_", "")
+    
+    # دریافت plan_key از state
+    data = await state.get_data()
+    plan_key = data.get("plan_key", "1m")
     
     await create_transaction(
         user_id=callback.from_user.id,
-        amount=Config.PRICES["1m"],
-        plan="1m",
+        amount=Config.PRICES[plan_key],
+        plan=plan_key,
         payment_method="card",
         payment_id=payment_id
     )
     
+    # ارسال به ادمین
     for admin_id in Config.ADMINS:
         await callback.bot.send_message(
             chat_id=admin_id,
@@ -162,15 +184,17 @@ async def confirm_payment(callback: types.CallbackQuery):
                 f"👤 کاربر: {callback.from_user.first_name}\n"
                 f"🆔 شناسه: `{callback.from_user.id}`\n"
                 f"📌 شناسه پرداخت: `{payment_id}`\n"
-                f"💰 مبلغ: {Config.PRICES['1m']} دلار\n\n"
-                f"برای تأیید از پنل مدیریت استفاده کنید."
+                f"📅 پلن: {Config.PLANS[plan_key]['name']}\n"
+                f"💰 مبلغ: {Config.PRICES[plan_key]} دلار\n\n"
+                f"برای تأیید یا رد، از پنل مدیریت استفاده کنید."
             ),
             parse_mode="Markdown"
         )
     
     await callback.message.edit_text(
         "✅ **درخواست شما به ادمین ارسال شد.**\n\n"
-        "پس از تأیید، اشتراک شما فعال خواهد شد.",
+        "پس از تأیید پرداخت، اشتراک شما فعال خواهد شد.\n"
+        "لطفاً صبور باشید. 🙏",
         reply_markup=get_back_keyboard(),
         parse_mode="Markdown"
     )
@@ -184,7 +208,8 @@ async def show_status(callback: types.CallbackQuery):
     
     if not user or not user["is_active"]:
         await callback.message.edit_text(
-            "❌ **شما اشتراک فعالی ندارید.**",
+            "❌ **شما اشتراک فعالی ندارید.**\n\n"
+            "لطفاً از بخش خرید اشتراک، یک پلن تهیه کنید.",
             reply_markup=get_main_keyboard(),
             parse_mode="Markdown"
         )
@@ -198,6 +223,7 @@ async def show_status(callback: types.CallbackQuery):
         f"📊 **وضعیت اشتراک شما**\n"
         f"━━━━━━━━━━━━━━━━━\n"
         f"💎 پلن: {Config.PLANS[user['plan']]['name']}\n"
+        f"📅 تاریخ شروع: {to_jalali_full(datetime.fromisoformat(user['subscription_start']))}\n"
         f"📅 تاریخ پایان: {to_jalali_full(end_date)}\n"
         f"⏳ روزهای باقی‌مانده: **{remaining} روز**\n"
         f"📊 وضعیت: {'✅ فعال' if user['is_active'] else '❌ غیرفعال'}"
@@ -224,12 +250,31 @@ async def show_profile(callback: types.CallbackQuery):
         f"━━━━━━━━━━━━━━━━━\n"
         f"🆔 شناسه: `{user['user_id']}`\n"
         f"👤 نام: {user['first_name'] or 'ندارد'}\n"
+        f"📛 نام کاربری: @{user['username'] or 'ندارد'}\n"
         f"📅 تاریخ ثبت‌نام: {to_jalali_full(datetime.fromisoformat(user['registered_at']))}\n"
         f"💰 کل پرداختی: {total_paid} دلار\n"
         f"📊 وضعیت: {'✅ فعال' if user['is_active'] else '❌ غیرفعال'}"
     )
     
     await callback.message.edit_text(text, reply_markup=get_main_keyboard(), parse_mode="Markdown")
+    await callback.answer()
+
+# ==================== تمدید اشتراک ====================
+
+@router.callback_query(lambda c: c.data == "renew")
+async def renew_subscription(callback: types.CallbackQuery):
+    user = await get_user(callback.from_user.id)
+    
+    if not user or not user["is_active"]:
+        await callback.answer("❌ شما اشتراک فعالی ندارید!", show_alert=True)
+        return
+    
+    await callback.message.edit_text(
+        "💳 **تمدید اشتراک**\n\n"
+        "لطفاً پلن مورد نظر برای تمدید را انتخاب کنید:",
+        reply_markup=get_plans_keyboard(),
+        parse_mode="Markdown"
+    )
     await callback.answer()
 
 # ==================== پشتیبانی ====================
@@ -239,9 +284,11 @@ async def show_support(callback: types.CallbackQuery):
     text = (
         "📞 **پشتیبانی**\n"
         f"━━━━━━━━━━━━━━━━━\n"
+        f"برای ارتباط با پشتیبانی، از طریق یکی از راه‌های زیر اقدام کنید:\n\n"
         f"👤 پشتیبان ۱: {Config.SUPPORT_IDS[0]}\n"
         f"👤 پشتیبان ۲: {Config.SUPPORT_IDS[1]}\n"
-        f"👤 پشتیبان ۳: {Config.SUPPORT_IDS[2]}"
+        f"👤 پشتیبان ۳: {Config.SUPPORT_IDS[2]}\n\n"
+        f"یا از طریق ربات تیکت ثبت کنید."
     )
     
     await callback.message.edit_text(
@@ -259,36 +306,19 @@ async def show_help(callback: types.CallbackQuery):
         "📚 **آموزش استفاده از ربات**\n"
         f"━━━━━━━━━━━━━━━━━\n"
         f"1️⃣ **خرید اشتراک**\n"
-        f"   از منوی اصلی گزینه «خرید اشتراک» را انتخاب کنید.\n\n"
+        f"   از منوی اصلی گزینه «خرید اشتراک» را انتخاب کنید.\n"
+        f"   سپس پلن مورد نظر و روش پرداخت را انتخاب کنید.\n\n"
         f"2️⃣ **تمدید اشتراک**\n"
         f"   اگر اشتراک فعال دارید، از گزینه «تمدید اشتراک» استفاده کنید.\n\n"
         f"3️⃣ **مشاهده وضعیت**\n"
-        f"   با انتخاب «وضعیت اشتراک» روزهای باقی‌مانده را ببینید.\n\n"
+        f"   با انتخاب «وضعیت اشتراک» می‌توانید روزهای باقی‌مانده را ببینید.\n\n"
         f"4️⃣ **پشتیبانی**\n"
-        f"   در صورت نیاز از بخش پشتیبانی استفاده کنید."
+        f"   در صورت نیاز، از بخش پشتیبانی با ما در ارتباط باشید."
     )
     
     await callback.message.edit_text(
         text,
         reply_markup=get_back_keyboard(),
-        parse_mode="Markdown"
-    )
-    await callback.answer()
-
-# ==================== تمدید اشتراک ====================
-
-@router.callback_query(lambda c: c.data == "renew")
-async def renew_subscription(callback: types.CallbackQuery):
-    user = await get_user(callback.from_user.id)
-    
-    if not user or not user["is_active"]:
-        await callback.answer("❌ شما اشتراک فعالی ندارید!", show_alert=True)
-        return
-    
-    await callback.message.edit_text(
-        "💳 **تمدید اشتراک**\n\n"
-        "لطفاً پلن مورد نظر را انتخاب کنید:",
-        reply_markup=get_plans_keyboard(),
         parse_mode="Markdown"
     )
     await callback.answer()
@@ -299,13 +329,34 @@ async def renew_subscription(callback: types.CallbackQuery):
 async def show_discount(callback: types.CallbackQuery):
     await callback.message.edit_text(
         "🎁 **کد تخفیف**\n\n"
-        "برای اعمال کد تخفیف:\n"
+        "اگر کد تخفیف دارید، آن را وارد کنید:\n\n"
         "`/discount کد_تخفیف`\n\n"
         "مثال: `/discount SUMMER20`",
         reply_markup=get_back_keyboard(),
         parse_mode="Markdown"
     )
     await callback.answer()
+
+@router.message(Command("discount"))
+async def apply_discount(message: types.Message):
+    parts = message.text.split()
+    if len(parts) < 2:
+        await message.answer("❌ لطفاً کد تخفیف را وارد کنید.\nمثال: `/discount SUMMER20`", parse_mode="Markdown")
+        return
+    
+    code = parts[1].upper()
+    discount = await get_discount(code)
+    
+    if not discount:
+        await message.answer("❌ کد تخفیف نامعتبر یا منقضی شده است.")
+        return
+    
+    await message.answer(
+        f"✅ **کد تخفیف {code} با موفقیت اعمال شد!**\n\n"
+        f"🎁 تخفیف: {discount['discount_percent']}%\n"
+        f"🔢 تعداد استفاده: {discount['used_count']}/{discount['max_uses']}\n\n"
+        f"تخفیف در خرید بعدی شما اعمال خواهد شد."
+    )
 
 # ==================== دکمه بازگشت ====================
 
