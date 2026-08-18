@@ -1,6 +1,7 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from config import Config
 
+
 def get_main_keyboard():
     """منوی اصلی"""
     return InlineKeyboardMarkup(
@@ -96,3 +97,5 @@ def get_back_keyboard():
             [InlineKeyboardButton(text="🔙 بازگشت", callback_data="back")]
         ]
     )
+
+

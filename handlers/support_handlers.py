@@ -3,7 +3,10 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from datetime import datetime
-from database.repository import create_ticket, get_user, get_ticket, get_user_tickets
+from database.repository import (
+    create_ticket, get_ticket, get_user_tickets,
+    get_all_tickets, answer_ticket, close_ticket, get_user
+)
 from keyboards.inline import get_back_keyboard, get_main_keyboard
 from utils.helpers import is_admin
 from config import Config
@@ -16,7 +19,7 @@ class TicketStates(StatesGroup):
     waiting_for_subject = State()
     waiting_for_message = State()
 
-# ==================== مشاهده تیکت‌ها ====================
+# ==================== مشاهده تیکت‌ها (کاربر) ====================
 
 @router.message(Command("tickets"))
 async def show_user_tickets(message: types.Message):
@@ -67,11 +70,11 @@ async def show_ticket_detail(message: types.Message):
     
     await message.answer(text, parse_mode="Markdown")
 
-# ==================== ثبت تیکت ====================
+# ==================== ثبت تیکت جدید ====================
 
 @router.callback_query(lambda c: c.data == "support")
 async def show_support_options(callback: types.CallbackQuery):
-    user = await get_user(callback.from_user.id)
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     
     text = (
         "📞 **پشتیبانی**\n"
@@ -80,8 +83,7 @@ async def show_support_options(callback: types.CallbackQuery):
         f"👤 پشتیبان ۱: {Config.SUPPORT_IDS[0]}\n"
         f"👤 پشتیبان ۲: {Config.SUPPORT_IDS[1]}\n"
         f"👤 پشتیبان ۳: {Config.SUPPORT_IDS[2]}\n\n"
-        f"📝 **یا از طریق ربات تیکت ثبت کنید:**\n"
-        f"روی دکمه **«ثبت تیکت»** کلیک کنید."
+        f"📝 **یا از طریق ربات تیکت ثبت کنید:**"
     )
     
     await callback.message.edit_text(
@@ -99,11 +101,6 @@ async def show_support_options(callback: types.CallbackQuery):
 
 @router.callback_query(lambda c: c.data == "new_ticket")
 async def start_new_ticket(callback: types.CallbackQuery, state: FSMContext):
-    user = await get_user(callback.from_user.id)
-    if not user:
-        await callback.answer("❌ ابتدا ربات را استارت کنید: /start", show_alert=True)
-        return
-    
     await state.set_state(TicketStates.waiting_for_subject)
     await callback.message.edit_text(
         "📝 **ثبت تیکت پشتیبانی**\n\n"
@@ -120,8 +117,7 @@ async def ticket_subject(message: types.Message, state: FSMContext):
     await state.set_state(TicketStates.waiting_for_message)
     await message.answer(
         "📝 **پیام خود را وارد کنید:**\n\n"
-        "توضیحات کامل مشکل یا درخواست خود را بنویسید.\n"
-        "پشتیبانی در اسرع وقت پاسخ خواهد داد.",
+        "توضیحات کامل مشکل یا درخواست خود را بنویسید.",
         reply_markup=get_back_keyboard(),
         parse_mode="Markdown"
     )
@@ -132,7 +128,6 @@ async def ticket_message(message: types.Message, state: FSMContext):
     subject = data.get("subject")
     ticket_message = message.text
     
-    # ثبت تیکت در دیتابیس
     await create_ticket(
         user_id=message.from_user.id,
         subject=subject,
@@ -181,7 +176,6 @@ async def admin_tickets_list(callback: types.CallbackQuery):
         await callback.answer("⛔ دسترسی غیرمجاز!", show_alert=True)
         return
     
-    from database.repository import get_all_tickets
     tickets = await get_all_tickets()
     open_tickets = [t for t in tickets if t["status"] == "open"]
     
@@ -190,11 +184,11 @@ async def admin_tickets_list(callback: types.CallbackQuery):
     text += f"📊 کل تیکت‌ها: {len(tickets)}\n\n"
     
     if open_tickets:
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
         for t in open_tickets[:10]:
             text += f"📌 #{t['id']} - کاربر {t['user_id']}: {t['subject'][:20]}...\n"
         text += "\nبرای پاسخ، روی شناسه تیکت کلیک کنید."
         
-        # دکمه‌های تیکت‌های باز
         buttons = []
         for t in open_tickets[:10]:
             buttons.append([
@@ -213,7 +207,7 @@ async def admin_tickets_list(callback: types.CallbackQuery):
     else:
         await callback.message.edit_text(
             text + "✅ همه تیکت‌ها پاسخ داده شده‌اند.",
-            reply_markup=get_admin_panel_keyboard(),
+            reply_markup=get_back_keyboard(),
             parse_mode="Markdown"
         )
     await callback.answer()
@@ -233,6 +227,8 @@ async def admin_ticket_detail(callback: types.CallbackQuery):
     
     user = await get_user(ticket["user_id"])
     username = f"@{user['username']}" if user and user["username"] else f"کاربر {ticket['user_id']}"
+    
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     
     text = (
         f"📋 **تیکت #{ticket['id']}**\n"
@@ -275,14 +271,12 @@ async def admin_answer_ticket(callback: types.CallbackQuery):
     
     await callback.message.edit_text(
         f"✏️ **پاسخ به تیکت #{ticket_id}**\n\n"
-        f"لطفاً پاسخ خود را به صورت یک پیام متنی ارسال کنید.\n"
-        f"(متن، تصویر، یا فایل)",
+        f"لطفاً پاسخ خود را به صورت زیر ارسال کنید:\n"
+        f"`/answerticket {ticket_id} پاسخ شما`\n\n"
+        f"مثال: `/answerticket {ticket_id} مشکل شما برطرف شد.`",
         reply_markup=get_back_keyboard(),
         parse_mode="Markdown"
     )
-    
-    # ذخیره وضعیت برای دریافت پاسخ
-    # برای سادگی، از کاربر می‌خواهیم پاسخ را با دستور بفرستد
     await callback.answer()
 
 @router.message(Command("answerticket"))
@@ -304,8 +298,6 @@ async def admin_send_answer(message: types.Message):
     ticket_id = int(parts[1])
     answer_text = parts[2]
     
-    from database.repository import answer_ticket, get_ticket
-    
     ticket = await get_ticket(ticket_id)
     if not ticket:
         await message.answer("❌ تیکت یافت نشد.")
@@ -313,7 +305,6 @@ async def admin_send_answer(message: types.Message):
     
     await answer_ticket(ticket_id, answer_text)
     
-    # ارسال پاسخ به کاربر
     try:
         await message.bot.send_message(
             chat_id=ticket["user_id"],
@@ -337,8 +328,6 @@ async def admin_close_ticket(callback: types.CallbackQuery):
         return
     
     ticket_id = int(callback.data.replace("ticket_close_", ""))
-    from database.repository import close_ticket
-    
     await close_ticket(ticket_id)
     
     await callback.message.edit_text(

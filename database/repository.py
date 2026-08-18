@@ -2,6 +2,7 @@ import aiosqlite
 from datetime import datetime, timedelta
 from typing import List, Optional
 from .db import DATABASE_URL
+from config import Config
 
 # ==================== کاربران ====================
 
@@ -290,5 +291,33 @@ async def close_ticket(ticket_id: int):
         await db.execute(
             "UPDATE tickets SET status = 'closed' WHERE id = ?",
             (ticket_id,)
+        )
+        await db.commit()
+
+
+# ==================== تنظیمات (قیمت‌ها) ====================
+
+async def get_price(plan_key: str) -> int:
+    """دریافت قیمت یک پلن از دیتابیس"""
+    async with aiosqlite.connect(DATABASE_URL) as db:
+        cursor = await db.execute(
+            "SELECT value FROM settings WHERE key = ?",
+            (f"price_{plan_key}",)
+        )
+        row = await cursor.fetchone()
+        if row:
+            return int(row[0])
+        # اگر در دیتابیس نبود، از مقدار پیش‌فرض Config استفاده کن
+        return Config.PRICES.get(plan_key, 0)
+
+async def set_price(plan_key: str, price: int):
+    """ذخیره قیمت یک پلن در دیتابیس"""
+    async with aiosqlite.connect(DATABASE_URL) as db:
+        await db.execute(
+            """
+            INSERT OR REPLACE INTO settings (key, value)
+            VALUES (?, ?)
+            """,
+            (f"price_{plan_key}", str(price))
         )
         await db.commit()

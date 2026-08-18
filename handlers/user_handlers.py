@@ -16,6 +16,7 @@ from keyboards.inline import (
     get_back_keyboard
 )
 from utils.jalali import to_jalali_full, get_remaining_days
+from database.repository import get_price
 
 router = Router()
 
@@ -28,33 +29,31 @@ class PaymentStates(StatesGroup):
 
 @router.message(Command("start"))
 async def start_command(message: types.Message):
+    from database.repository import get_price
+    
     user = message.from_user
     await create_user(user.id, user.username, user.first_name)
     
     db_user = await get_user(user.id)
     
     if db_user and db_user["is_active"]:
-        end_date = datetime.fromisoformat(db_user["subscription_end"])
-        remaining = get_remaining_days(end_date)
+        # ... کدهای مربوط به کاربر فعال
+        pass
+    else:
+        # دریافت قیمت‌ها از دیتابیس
+        price_1m = await get_price("1m")
+        price_3m = await get_price("3m")
+        price_6m = await get_price("6m")
+        price_12m = await get_price("12m")
         
         await message.answer(
             f"🌟 **به ایران کریپتو خوش آمدید!**\n\n"
-            f"✅ شما هم‌اکنون کاربر VIP هستید.\n"
-            f"📅 تاریخ انقضا: {to_jalali_full(end_date)}\n"
-            f"⏳ روزهای باقی‌مانده: **{remaining} روز**\n\n"
-            f"لطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
-            reply_markup=get_main_keyboard(),
-            parse_mode="Markdown"
-        )
-    else:
-        await message.answer(
-            "🌟 **به ایران کریپتو خوش آمدید!**\n\n"
             "برای دسترسی به محتوای VIP، ابتدا اشتراک خود را تهیه کنید.\n\n"
             "💎 **پلن‌های ویژه:**\n"
-            f"• یک ماهه: {Config.PRICES['1m']} دلار\n"
-            f"• سه ماهه: {Config.PRICES['3m']} دلار\n"
-            f"• شش ماهه: {Config.PRICES['6m']} دلار\n"
-            f"• یک ساله: {Config.PRICES['12m']} دلار\n\n"
+            f"• یک ماهه: {price_1m} دلار\n"
+            f"• سه ماهه: {price_3m} دلار\n"
+            f"• شش ماهه: {price_6m} دلار\n"
+            f"• یک ساله: {price_12m} دلار\n\n"
             "لطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
             reply_markup=get_main_keyboard(),
             parse_mode="Markdown"
@@ -64,8 +63,15 @@ async def start_command(message: types.Message):
 
 @router.callback_query(lambda c: c.data == "buy")
 async def buy_subscription(callback: types.CallbackQuery):
+    from database.repository import get_price
+    
+    text = "📅 **لطفاً پلن مورد نظر خود را انتخاب کنید:**\n\n"
+    for key, plan in Config.PLANS.items():
+        price = await get_price(key)
+        text += f"• {plan['name']}: {price} دلار\n"
+    
     await callback.message.edit_text(
-        "📅 **لطفاً پلن مورد نظر خود را انتخاب کنید:**",
+        text,
         reply_markup=get_plans_keyboard(),
         parse_mode="Markdown"
     )
@@ -83,7 +89,7 @@ async def select_plan(callback: types.CallbackQuery, state: FSMContext):
     # ذخیره plan_key در state
     await state.update_data(plan_key=plan_key)
     
-    price = Config.PRICES[plan_key]
+    price = await get_price(plan_key)
     
     text = (
         f"💎 **پلن {plan['name']}**\n"

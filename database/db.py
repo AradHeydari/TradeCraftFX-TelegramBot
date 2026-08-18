@@ -68,6 +68,25 @@ async def init_db():
                 is_active INTEGER DEFAULT 1
             )
         """)
+
+        #جدول قیمت ها
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS broadcasts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                message TEXT,
+                sent_count INTEGER DEFAULT 0,
+                failed_count INTEGER DEFAULT 0,
+                created_at TEXT
+            )
+        """)
+
+        # جدول تنظیمات (برای ذخیره قیمت‌ها)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+            )
+        """)
         
         await db.commit()
 
