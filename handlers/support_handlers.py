@@ -128,11 +128,29 @@ async def ticket_message(message: types.Message, state: FSMContext):
     subject = data.get("subject")
     ticket_message = message.text
     
+    # ✅ ثبت تیکت در دیتابیس
     await create_ticket(
         user_id=message.from_user.id,
         subject=subject,
         message=ticket_message
     )
+    
+    # ✅ اطلاع‌رسانی به ادمین با اطلاعات کامل کاربر
+    user = message.from_user
+    for admin_id in Config.ADMINS:
+        await message.bot.send_message(
+            chat_id=admin_id,
+            text=(
+                f"🎫 **تیکت جدید از کاربر**\n"
+                f"━━━━━━━━━━━━━━━━━\n"
+                f"👤 کاربر: {user.first_name}\n"
+                f"🆔 شناسه: `{user.id}`\n"
+                f"📌 موضوع: {subject}\n"
+                f"📝 پیام: {ticket_message}\n\n"
+                f"برای پاسخ، از پنل مدیریت استفاده کنید."
+            ),
+            parse_mode="Markdown"
+        )
     
     await state.clear()
     await message.answer(
@@ -335,3 +353,30 @@ async def admin_close_ticket(callback: types.CallbackQuery):
         parse_mode="Markdown"
     )
     await callback.answer("✅ تیکت بسته شد!")
+
+
+# ====================ثبت تیکت====================
+
+@router.callback_query(lambda c: c.data == "new_ticket")
+async def start_new_ticket_from_menu(callback: types.CallbackQuery, state: FSMContext):
+    """شروع ثبت تیکت از منوی اصلی"""
+    await state.set_state(TicketStates.waiting_for_subject)
+    await callback.message.edit_text(
+        "📝 **ثبت تیکت پشتیبانی**\n\n"
+        "لطفاً **موضوع** تیکت خود را وارد کنید:\n"
+        "(مثلاً: مشکل در پرداخت، مشکل دسترسی و ...)",
+        reply_markup=get_back_keyboard(),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+
+
+
+
+
+
+
+
+
+

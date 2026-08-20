@@ -538,8 +538,10 @@ async def admin_broadcast_start(callback: types.CallbackQuery):
     await callback.answer()
 
 
-@router.message(F.text & ~F.text.startswith("/") | F.photo | F.video | F.document)
+# فقط پیام‌های ادمین را بگیر و اگر با / شروع نشده باشد
+@router.message(F.text & ~F.text.startswith("/"))
 async def broadcast_send(message: types.Message):
+    # فقط ادمین می‌تواند پیام همگانی بفرستد
     if not await is_admin(message.from_user.id):
         return
     
@@ -552,24 +554,11 @@ async def broadcast_send(message: types.Message):
     
     for user in users:
         try:
-            if message.text:
-                await message.bot.send_message(
-                    chat_id=user["user_id"],
-                    text=message.text,
-                    parse_mode="Markdown" if message.text else None,
-                )
-            elif message.photo:
-                await message.bot.send_photo(
-                    chat_id=user["user_id"],
-                    photo=message.photo[-1].file_id,
-                    caption=message.caption,
-                )
-            elif message.video:
-                await message.bot.send_video(
-                    chat_id=user["user_id"],
-                    video=message.video.file_id,
-                    caption=message.caption,
-                )
+            await message.bot.send_message(
+                chat_id=user["user_id"],
+                text=message.text,
+                parse_mode="Markdown" if message.text else None,
+            )
             sent_count += 1
         except Exception:
             failed_count += 1

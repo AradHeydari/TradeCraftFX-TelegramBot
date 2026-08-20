@@ -29,7 +29,7 @@ class PaymentStates(StatesGroup):
 
 @router.message(Command("start"))
 async def start_command(message: types.Message):
-    from database.repository import get_price
+    from database.repository import get_price, get_user, create_user
     
     user = message.from_user
     await create_user(user.id, user.username, user.first_name)
@@ -37,10 +37,24 @@ async def start_command(message: types.Message):
     db_user = await get_user(user.id)
     
     if db_user and db_user["is_active"]:
-        # ... کدهای مربوط به کاربر فعال
-        pass
+        # کاربر فعال است
+        from utils.jalali import to_jalali_full, get_remaining_days
+        from datetime import datetime
+        
+        end_date = datetime.fromisoformat(db_user["subscription_end"])
+        remaining = get_remaining_days(end_date)
+        
+        await message.answer(
+            f"🌟 **به ایران کریپتو خوش آمدید!**\n\n"
+            f"✅ شما هم‌اکنون کاربر VIP هستید.\n"
+            f"📅 تاریخ انقضا: {to_jalali_full(end_date)}\n"
+            f"⏳ روزهای باقی‌مانده: **{remaining} روز**\n\n"
+            f"لطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
+            reply_markup=get_main_keyboard(),
+            parse_mode="Markdown"
+        )
     else:
-        # دریافت قیمت‌ها از دیتابیس
+        # کاربر غیرفعال است
         price_1m = await get_price("1m")
         price_3m = await get_price("3m")
         price_6m = await get_price("6m")

@@ -321,3 +321,6 @@ async def set_price(plan_key: str, price: int):
             (f"price_{plan_key}", str(price))
         )
         await db.commit()
+
+
+

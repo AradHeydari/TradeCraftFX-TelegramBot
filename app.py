@@ -34,9 +34,9 @@ async def main():
     dp.startup.register(on_startup)
     
     # ثبت همه هندلرها
-    dp.include_router(user_handlers.router)
-    dp.include_router(admin_handlers.router)
-    dp.include_router(support_handlers.router)
+    dp.include_router(user_handlers.router)      # اول: دستورات کاربر
+    dp.include_router(support_handlers.router)   # دوم: تیکت‌ها (با FSM)
+    dp.include_router(admin_handlers.router)     # آخر: مدیریت (broadcast)
     
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)

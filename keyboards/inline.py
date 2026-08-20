@@ -3,7 +3,7 @@ from config import Config
 
 
 def get_main_keyboard():
-    """منوی اصلی"""
+    """منوی اصلی با ۸ گزینه (افزودن گزینه تیکت)"""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🛒 خرید اشتراک", callback_data="buy")],
@@ -13,7 +13,7 @@ def get_main_keyboard():
             [InlineKeyboardButton(text="📞 پشتیبانی", callback_data="support")],
             [InlineKeyboardButton(text="📚 آموزش استفاده", callback_data="help")],
             [InlineKeyboardButton(text="🎁 کد تخفیف", callback_data="discount")],
-            [InlineKeyboardButton(text="⭐ امتیاز به ربات", url="https://t.me/bot_rating")],
+            [InlineKeyboardButton(text="🎫 ثبت تیکت", callback_data="new_ticket")],  # ✅ گزینه جدید
         ]
     )
 
