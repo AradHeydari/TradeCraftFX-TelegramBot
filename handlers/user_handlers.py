@@ -1,5 +1,7 @@
 import uuid
 from datetime import datetime, timedelta
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.fsm.state import State, StatesGroup
 from aiogram import Router, types, F
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.state import State, StatesGroup
@@ -24,6 +26,7 @@ router = Router()
 
 class PaymentStates(StatesGroup):
     waiting_for_payment = State()
+    waiting_for_receipt = State()  # ✅ جدید
 
 # ==================== دستور /start ====================
 
@@ -186,36 +189,27 @@ async def confirm_payment(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
     plan_key = data.get("plan_key", "1m")
     
-    await create_transaction(
+    # ✅ ذخیره اطلاعات در state برای مرحله بعد
+    await state.update_data(
+        payment_id=payment_id,
+        plan_key=plan_key,
         user_id=callback.from_user.id,
-        amount=Config.PRICES[plan_key],
-        plan=plan_key,
-        payment_method="card",
-        payment_id=payment_id
+        user_name=callback.from_user.first_name
     )
     
-    # ارسال به ادمین
-    for admin_id in Config.ADMINS:
-        await callback.bot.send_message(
-            chat_id=admin_id,
-            text=(
-                f"🔔 **درخواست تأیید پرداخت جدید**\n"
-                f"━━━━━━━━━━━━━━━━━\n"
-                f"👤 کاربر: {callback.from_user.first_name}\n"
-                f"🆔 شناسه: `{callback.from_user.id}`\n"
-                f"📌 شناسه پرداخت: `{payment_id}`\n"
-                f"📅 پلن: {Config.PLANS[plan_key]['name']}\n"
-                f"💰 مبلغ: {Config.PRICES[plan_key]} دلار\n\n"
-                f"برای تأیید یا رد، از پنل مدیریت استفاده کنید."
-            ),
-            parse_mode="Markdown"
-        )
+    # ✅ تغییر وضعیت به waiting_for_receipt
+    await state.set_state(PaymentStates.waiting_for_receipt)
     
+    # ✅ درخواست عکس از کاربر
     await callback.message.edit_text(
-        "✅ **درخواست شما به ادمین ارسال شد.**\n\n"
-        "پس از تأیید پرداخت، اشتراک شما فعال خواهد شد.\n"
-        "لطفاً صبور باشید. 🙏",
-        reply_markup=get_back_keyboard(),
+        "📸 **لطفاً عکس رسید پرداخت خود را ارسال کنید.**\n\n"
+        "پس از ارسال عکس، درخواست شما برای ادمین ارسال خواهد شد.\n\n"
+        "⏳ اگر عکس ندارید، روی دکمه **«لغو»** کلیک کنید.",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="❌ لغو", callback_data="cancel_payment")]
+            ]
+        ),
         parse_mode="Markdown"
     )
     await callback.answer()
@@ -389,3 +383,92 @@ async def go_back(callback: types.CallbackQuery):
         parse_mode="Markdown"
     )
     await callback.answer()
+
+
+# ===================دریافت عکس====================
+
+@router.message(PaymentStates.waiting_for_receipt, F.photo)
+async def receive_receipt(message: types.Message, state: FSMContext):
+    """دریافت عکس رسید و ارسال به ادمین"""
+    
+    # دریافت اطلاعات از state
+    data = await state.get_data()
+    payment_id = data.get("payment_id")
+    plan_key = data.get("plan_key", "1m")
+    user_id = data.get("user_id")
+    user_name = data.get("user_name", "کاربر")
+    
+    if not payment_id:
+        await message.answer("❌ خطا: اطلاعات پرداخت یافت نشد. لطفاً دوباره تلاش کنید.")
+        await state.clear()
+        return
+    
+    # دریافت عکس
+    photo = message.photo[-1]  # بهترین کیفیت
+    
+    # ✅ ثبت تراکنش در دیتابیس (همان کد قبلی)
+    await create_transaction(
+        user_id=user_id,
+        amount=Config.PRICES[plan_key],
+        plan=plan_key,
+        payment_method="card",
+        payment_id=payment_id
+    )
+    
+    # ✅ ارسال عکس + اطلاعات به ادمین (همان کد قبلی + عکس)
+    for admin_id in Config.ADMINS:
+        try:
+            await message.bot.send_photo(
+                chat_id=admin_id,
+                photo=photo.file_id,
+                caption=(
+                    f"🔔 **درخواست تأیید پرداخت جدید**\n"
+                    f"━━━━━━━━━━━━━━━━━\n"
+                    f"👤 کاربر: {user_name}\n"
+                    f"🆔 شناسه: `{user_id}`\n"
+                    f"📌 شناسه پرداخت: `{payment_id}`\n"
+                    f"📅 پلن: {Config.PLANS[plan_key]['name']}\n"
+                    f"💰 مبلغ: {Config.PRICES[plan_key]} دلار\n\n"
+                    f"🖼️ **رسید پرداخت:** (تصویر بالا)\n\n"
+                    f"برای تأیید یا رد، از پنل مدیریت استفاده کنید."
+                ),
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            print(f"خطا در ارسال به ادمین: {e}")
+    
+    # ✅ پیام به کاربر (همان کد قبلی)
+    await message.answer(
+        "✅ **عکس رسید شما با موفقیت ارسال شد!**\n\n"
+        "درخواست شما برای ادمین ارسال شده است.\n"
+        "پس از بررسی و تأیید، اشتراک شما فعال خواهد شد.\n\n"
+        "🙏 لطفاً صبور باشید.",
+        reply_markup=get_back_keyboard(),
+        parse_mode="Markdown"
+    )
+    
+    await state.clear()
+
+
+
+@router.callback_query(lambda c: c.data == "cancel_payment")
+async def cancel_payment(callback: types.CallbackQuery, state: FSMContext):
+    """لغو فرآیند پرداخت"""
+    await state.clear()
+    await callback.message.edit_text(
+        "❌ **فرآیند پرداخت لغو شد.**\n\n"
+        "در صورت نیاز دوباره تلاش کنید.",
+        reply_markup=get_main_keyboard(),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+
+@router.message(PaymentStates.waiting_for_receipt, F.text)
+async def invalid_receipt(message: types.Message):
+    """اگر کاربر به جای عکس، متن ارسال کند"""
+    await message.answer(
+        "❌ **لطفاً یک عکس ارسال کنید.**\n\n"
+        "از دکمه 📎 (گیره کاغذ) برای ارسال عکس رسید استفاده کنید.\n\n"
+        "اگر نمی‌خواهید ادامه دهید، روی دکمه **«لغو»** کلیک کنید."
+    )
