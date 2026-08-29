@@ -399,6 +399,7 @@ async def admin_confirm_payment(callback: types.CallbackQuery):
                 active=True,
             )
             
+            # ========== پیام تأیید پرداخت ==========
             await callback.bot.send_message(
                 chat_id=user_id,
                 text=(
@@ -411,8 +412,26 @@ async def admin_confirm_payment(callback: types.CallbackQuery):
                 ),
                 parse_mode="Markdown"
             )
-        except Exception:
-            pass
+            
+            # ========== ارسال لینک کانال خصوصی VIP ==========
+            if Config.PRIVATE_CHANNEL_LINK:
+                try:
+                    await callback.bot.send_message(
+                        chat_id=user_id,
+                        text=(
+                            f"🔗 **لینک کانال خصوصی VIP:**\n\n"
+                            f"{Config.PRIVATE_CHANNEL_LINK}\n\n"
+                            f"برای دسترسی به محتوای VIP، روی لینک کلیک کنید."
+                        ),
+                        parse_mode="Markdown"
+                    )
+                except Exception as e:
+                    print(f"خطا در ارسال لینک کانال به کاربر {user_id}: {e}")
+            else:
+                print("⚠️ لینک کانال خصوصی در .env تنظیم نشده است.")
+            
+        except Exception as e:
+            print(f"خطا در تأیید پرداخت: {e}")
     
     await callback.message.edit_text(
         f"✅ **پرداخت با شناسه `{payment_id}` تأیید شد.**\n\nبه کاربر اطلاع‌رسانی شد.",

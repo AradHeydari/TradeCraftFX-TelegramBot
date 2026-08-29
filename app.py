@@ -25,7 +25,7 @@ dp = Dispatcher()
 
 async def on_startup():
     await init_db()
-    setup_scheduler()
+    setup_scheduler(bot)
     print("✅ دیتابیس راه‌اندازی شد.")
     print("⏰ زمان‌بند راه‌اندازی شد.")
     print("🚀 ربات با موفقیت راه‌اندازی شد!")

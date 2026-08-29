@@ -11,7 +11,7 @@ class Config:
     ADMINS = [int(x.strip()) for x in os.getenv("ADMINS", "").split(",") if x.strip()]
     
     # کانال‌ها
-    PRIVATE_CHANNEL = os.getenv("PRIVATE_CHANNEL", "")
+    PRIVATE_CHANNEL_LINK = os.getenv("PRIVATE_CHANNEL_LINK", "")
     PUBLIC_CHANNEL = os.getenv("PUBLIC_CHANNEL", "")
     
     # اطلاعات بانکی
