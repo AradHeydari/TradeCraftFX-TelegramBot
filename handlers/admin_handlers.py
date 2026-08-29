@@ -167,6 +167,34 @@ def get_admin_user_actions_keyboard(user_id: int):
     )
 
 
+
+@router.callback_query(lambda c: c.data.startswith("admin_user_trans_"))
+async def admin_user_transactions(callback: types.CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("⛔ دسترسی غیرمجاز!", show_alert=True)
+        return
+    
+    user_id = int(callback.data.replace("admin_user_trans_", ""))
+    transactions = await get_transactions_by_user(user_id)
+    
+    if not transactions:
+        await callback.message.edit_text(f"📭 **کاربر {user_id} هیچ تراکنشی ندارد.**")
+        await callback.answer()
+        return
+    
+    text = f"📋 **تراکنش‌های کاربر {user_id}**\n━━━━━━━━━━━━━━━━━\n"
+    for t in transactions[:20]:
+        status_icon = "✅" if t["status"] == "paid" else "⏳" if t["status"] == "pending" else "❌"
+        text += f"{status_icon} {t['amount']}$ - {t['plan']} - {t['payment_method']}\n"
+    
+    if len(transactions) > 20:
+        text += f"\n... و {len(transactions) - 20} تراکنش دیگر"
+    
+    await callback.message.edit_text(text, parse_mode="Markdown")
+    await callback.answer()
+
+
+
 @router.callback_query(lambda c: c.data.startswith("admin_user_"))
 async def admin_user_detail(callback: types.CallbackQuery):
     if not await is_admin(callback.from_user.id):
@@ -262,32 +290,6 @@ async def admin_deactivate_user(callback: types.CallbackQuery):
         parse_mode="Markdown"
     )
     await callback.answer("✅ غیرفعال شد!")
-
-
-@router.callback_query(lambda c: c.data.startswith("admin_user_trans_"))
-async def admin_user_transactions(callback: types.CallbackQuery):
-    if not await is_admin(callback.from_user.id):
-        await callback.answer("⛔ دسترسی غیرمجاز!", show_alert=True)
-        return
-    
-    user_id = int(callback.data.replace("admin_user_trans_", ""))
-    transactions = await get_transactions_by_user(user_id)
-    
-    if not transactions:
-        await callback.message.edit_text(f"📭 **کاربر {user_id} هیچ تراکنشی ندارد.**")
-        await callback.answer()
-        return
-    
-    text = f"📋 **تراکنش‌های کاربر {user_id}**\n━━━━━━━━━━━━━━━━━\n"
-    for t in transactions[:20]:
-        status_icon = "✅" if t["status"] == "paid" else "⏳" if t["status"] == "pending" else "❌"
-        text += f"{status_icon} {t['amount']}$ - {t['plan']} - {t['payment_method']}\n"
-    
-    if len(transactions) > 20:
-        text += f"\n... و {len(transactions) - 20} تراکنش دیگر"
-    
-    await callback.message.edit_text(text, parse_mode="Markdown")
-    await callback.answer()
 
 
 # ==================== آمار کلی ====================

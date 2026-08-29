@@ -17,17 +17,14 @@ def get_main_keyboard():
         ]
     )
 
-def get_plans_keyboard(show_discount: bool = False):
-    """دکمه‌های انتخاب پلن"""
+def get_plans_keyboard(prices: dict):
+    """دکمه‌های انتخاب پلن با قیمت‌های دریافتی از دیتابیس"""
     buttons = []
     for key, plan in Config.PLANS.items():
-        price = Config.PRICES[key]
-        discount_text = ""
-        if show_discount:
-            discount_text = " 🔥"
+        price = prices.get(key, 0)
         buttons.append([
             InlineKeyboardButton(
-                text=f"📅 {plan['name']} - {price}$ {discount_text}",
+                text=f"📅 {plan['name']} - {price}$",
                 callback_data=f"plan_{key}"
             )
         ])

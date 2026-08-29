@@ -80,16 +80,20 @@ async def start_command(message: types.Message):
 
 @router.callback_query(lambda c: c.data == "buy")
 async def buy_subscription(callback: types.CallbackQuery):
-    from database.repository import get_price
+    # دریافت قیمت‌ها از دیتابیس
+    prices = {}
+    for key in Config.PLANS.keys():
+        prices[key] = await get_price(key)
     
+    # ساخت متن منو
     text = "📅 **لطفاً پلن مورد نظر خود را انتخاب کنید:**\n\n"
     for key, plan in Config.PLANS.items():
-        price = await get_price(key)
-        text += f"• {plan['name']}: {price} دلار\n"
+        text += f"• {plan['name']}: {prices[key]} دلار\n"
     
+    # ارسال کیبورد با قیمت‌های به‌روز
     await callback.message.edit_text(
         text,
-        reply_markup=get_plans_keyboard(),
+        reply_markup=get_plans_keyboard(prices),  # ← قیمت‌ها را به کیبورد می‌دهیم
         parse_mode="Markdown"
     )
     await callback.answer()
@@ -283,10 +287,15 @@ async def renew_subscription(callback: types.CallbackQuery):
         await callback.answer("❌ شما اشتراک فعالی ندارید!", show_alert=True)
         return
     
+    # دریافت قیمت‌ها از دیتابیس
+    prices = {}
+    for key in Config.PLANS.keys():
+        prices[key] = await get_price(key)
+    
     await callback.message.edit_text(
         "💳 **تمدید اشتراک**\n\n"
         "لطفاً پلن مورد نظر برای تمدید را انتخاب کنید:",
-        reply_markup=get_plans_keyboard(),
+        reply_markup=get_plans_keyboard(prices),
         parse_mode="Markdown"
     )
     await callback.answer()
